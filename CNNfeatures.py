@@ -16,6 +16,7 @@ from PIL import Image
 import os
 import h5py
 import numpy as np
+import random
 from argparse import ArgumentParser
 
 
@@ -97,19 +98,21 @@ def get_features(video_data, frame_batch_size=64, device='cuda'):
     frame_end = frame_start + frame_batch_size
     output1 = torch.Tensor().to(device)
     output2 = torch.Tensor().to(device)
-    while frame_end < video_length:
-        batch = video_data[frame_start:frame_end].to(device)
-        features_mean, features_std = extractor(batch)
-        output1 = torch.cat((output1, features_mean), 0)
-        output2 = torch.cat((output2, features_std), 0)
-        frame_end += frame_batch_size
-        frame_start += frame_batch_size
+    extractor.eval()
+    with torch.no_grad():
+	    while frame_end < video_length:
+	        batch = video_data[frame_start:frame_end].to(device)
+	        features_mean, features_std = extractor(batch)
+	        output1 = torch.cat((output1, features_mean), 0)
+	        output2 = torch.cat((output2, features_std), 0)
+	        frame_end += frame_batch_size
+	        frame_start += frame_batch_size
 
-    last_batch = video_data[frame_start:video_length].to(device)
-    features_mean, features_std = extractor(last_batch)
-    output1 = torch.cat((output1, features_mean), 0)
-    output2 = torch.cat((output2, features_std), 0)
-    output = torch.cat((output1, output2), 1).squeeze()
+	    last_batch = video_data[frame_start:video_length].to(device)
+	    features_mean, features_std = extractor(last_batch)
+	    output1 = torch.cat((output1, features_mean), 0)
+	    output2 = torch.cat((output2, features_std), 0)
+	    output = torch.cat((output1, output2), 1).squeeze()
 
     return output
 
@@ -124,6 +127,14 @@ if __name__ == "__main__":
     parser.add_argument('--disable_gpu', action='store_true',
                         help='flag whether to disable GPU')
     args = parser.parse_args()
+
+    torch.manual_seed(args.seed)  #
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    torch.utils.backcompat.broadcast_warning.enabled = True
 
     if args.database == 'KoNViD-1k':
         videos_dir = '/home/ldq/Downloads/KoNViD-1k/'  # videos dir
@@ -143,10 +154,10 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if not args.disable_gpu and torch.cuda.is_available() else "cpu")
 
-    Info = h5py.File(datainfo)
-    video_names = [Info[Info['video_names'][0, :][i]].value.tobytes()[::2].decode() for i in range(len(Info['video_names'][0, :]))]
+    Info = h5py.File(datainfo, 'r')
+    video_names = [Info[Info['video_names'][0, :][i]][()].tobytes()[::2].decode() for i in range(len(Info['video_names'][0, :]))]
     scores = Info['scores'][0, :]
-    video_format = Info['video_format'].value.tobytes()[::2].decode()
+    video_format = Info['video_format'][()].tobytes()[::2].decode()
     width = int(Info['width'][0])
     height = int(Info['height'][0])
     dataset = VideoDataset(videos_dir, video_names, scores, video_format, width, height)
